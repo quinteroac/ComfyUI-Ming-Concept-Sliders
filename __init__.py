@@ -15,15 +15,16 @@ WEB_DIRECTORY = "./web"
 
 BIAS_KEY = "ming_concept_bias"
 WEIGHT_KEY = "ming_concept_weight"
+RAW_KEY = "ming_concept_raw_weight"
 CURVE_KEY = "ming_concept_curve"
 # Per text token arrays and their value for tokens that are not a slider concept.
-NEUTRAL = {BIAS_KEY: 0.0, WEIGHT_KEY: 1.0, CURVE_KEY: 0.0}
+NEUTRAL = {BIAS_KEY: 0.0, WEIGHT_KEY: 1.0, RAW_KEY: 1.0, CURVE_KEY: 0.0}
 CURVES_OPTION = "ming_concept_curves"
 MAX_CURVE_CONCEPTS = 4
 # Ming-Image wraps the prompt in "<role>SYSTEM</role>...<role>HUMAN</role>" ... "<|role_end|><role>ASSISTANT</role><image><imagePatch></image>".
 # The direct context holds the per token states up to "</role>": 20 head tokens, the prompt, 6 tail tokens.
 TEMPLATE_HEAD, DIRECT_TAIL = 20, 6
-MODE_TOOLTIP = "weight_norm scales the concept's attention values and keeps each attention output at the magnitude of the concept as written, attention scales how much the image attends to the concept."
+MODE_TOOLTIP = "weight_norm scales the concept's attention values and keeps each attention output at the magnitude of the concept as written, weight scales them with no limit, attention scales how much the image attends to the concept."
 
 
 def extra_conds_with_concept(original, cond, values):
@@ -62,13 +63,13 @@ def with_mask(args, bias):
     return (args[0], mask) + tuple(args[2:])
 
 
-def concept_attention(previous, bias, weight, image_len):
+def concept_attention(previous, bias, weight, raw, image_len):
     def override(func, q, k, v, *args, **kwargs):
         def attention(v, args=args):
             if previous is not None:
                 return previous(func, q, k, v, *args, **kwargs)
             return func(q, k, v, *args, **kwargs)
-        text_len = (bias if bias is not None else weight).shape[1]
+        text_len = next(a for a in (bias, weight, raw) if a is not None).shape[1]
         # The context refiner sees only the text, the joint blocks the text first and then the image, the noise refiner only the image.
         if k.shape[2] not in (text_len, text_len + image_len):
             return attention(v)
@@ -76,10 +77,14 @@ def concept_attention(previous, bias, weight, image_len):
         if bias is not None:
             # log(w) on the logits multiplies the concept's share of attention by w before softmax renormalizes.
             args = with_mask(args, torch.nn.functional.pad(bias.to(q), (0, rest))[:, None, None, :])
+        def scale(array):
+            return torch.nn.functional.pad(array.to(v), (0, rest), value=1.0)[:, None, :, None]
+        if raw is not None:
+            # weight: the concept's values scaled as they are, the attention output grows with them.
+            v = v * scale(raw)
         if weight is None:
             return attention(v, args)
-        scale = torch.nn.functional.pad(weight.to(v), (0, rest), value=1.0)[:, None, :, None]
-        out = attention(v * scale, args)
+        out = attention(v * scale(weight), args)
         # The concepts as written set the magnitude, so the weights only turn each head's output.
         # The backend returns the heads concatenated, [b, s, heads * dim_head].
         heads = args[0]
@@ -95,16 +100,17 @@ def image_tokens(model, x, ref_frames):
     return frames * -(-x.shape[-2] // p) * -(-x.shape[-1] // p) + sum(-(-r.shape[-2] // p) * -(-r.shape[-1] // p) for r in ref_frames or [])
 
 
-def install_override(executor, x, transformer_options, kwargs, bias, weight):
+def install_override(executor, x, transformer_options, kwargs, bias, weight, raw):
     image_len = image_tokens(executor.class_obj, x, kwargs.get("ref_frames"))
-    return {**transformer_options, "optimized_attention_override": concept_attention(transformer_options.get("optimized_attention_override"), bias, weight, image_len)}
+    return {**transformer_options, "optimized_attention_override": concept_attention(transformer_options.get("optimized_attention_override"), bias, weight, raw, image_len)}
 
 
 def concept_attention_wrapper(executor, x, timestep, context, num_tokens, attention_mask=None, transformer_options={}, **kwargs):
     bias = kwargs.pop(BIAS_KEY, None)
     weight = kwargs.pop(WEIGHT_KEY, None)
-    if bias is not None or weight is not None:
-        transformer_options = install_override(executor, x, transformer_options, kwargs, bias, weight)
+    raw = kwargs.pop(RAW_KEY, None)
+    if bias is not None or weight is not None or raw is not None:
+        transformer_options = install_override(executor, x, transformer_options, kwargs, bias, weight, raw)
     return executor(x, timestep, context, num_tokens, attention_mask, transformer_options=transformer_options, **kwargs)
 
 
@@ -145,13 +151,14 @@ def concept_curve_wrapper(executor, x, timestep, context, num_tokens, attention_
             # Row 0 is every token that is not a curve concept.
             return torch.tensor([1.0] + [s if mode == m else 1.0 for s, (_, _, mode) in zip(strengths, curves)], device=numbers.device)[index]
         weight = table("weight_norm") if "weight_norm" in modes else None
+        raw = table("weight") if "weight" in modes else None
         bias = table("attention").log() if "attention" in modes else None
-        transformer_options = install_override(executor, x, transformer_options, kwargs, bias, weight)
+        transformer_options = install_override(executor, x, transformer_options, kwargs, bias, weight, raw)
     return executor(x, timestep, context, num_tokens, attention_mask, transformer_options=transformer_options, **kwargs)
 
 
 def mode_input():
-    return io.Combo.Input("mode", options=["weight_norm", "attention"], tooltip=MODE_TOOLTIP)
+    return io.Combo.Input("mode", options=["weight_norm", "weight", "attention"], tooltip=MODE_TOOLTIP)
 
 
 def encode_concept(clip, concept):
@@ -161,6 +168,8 @@ def encode_concept(clip, concept):
 def add_concept(patched, clip, concept, strength, mode):
     if mode == "attention":
         values = {BIAS_KEY: math.log(strength)}
+    elif mode == "weight":
+        values = {RAW_KEY: strength}
     else:
         values = {WEIGHT_KEY: strength}
     patched.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL, WEIGHT_KEY, concept_attention_wrapper)

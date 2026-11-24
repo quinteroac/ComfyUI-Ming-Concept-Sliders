@@ -99,7 +99,7 @@ class SliderTests(TinyMing):
         self.assertIs(sliders.MingConceptSlider.execute(self.model, self.clip, "", "broad smile", "attention", -1.0, False)[0], self.model)
 
     def test_one_is_the_concept_written_at_the_end(self):
-        for mode in ("attention", "weight_norm"):
+        for mode in ("attention", "weight_norm", "weight"):
             with self.subTest(mode=mode):
                 self.setUp()
                 patched = self.slider("broad smile", '{"broad smile": 1}', mode)
@@ -107,13 +107,13 @@ class SliderTests(TinyMing):
 
     def test_strength_changes_the_image(self):
         written = self.sample(self.model, self.written("broad smile"))
-        for mode in ("attention", "weight_norm"):
+        for mode in ("attention", "weight_norm", "weight"):
             with self.subTest(mode=mode):
                 self.setUp()
                 self.assertGreater((self.sample(self.slider("broad smile", '{"broad smile": 3}', mode)) - written).abs().max().item(), 1e-3)
 
     def test_edit_references_keep_the_concept_in_place(self):
-        for mode in ("attention", "weight_norm"):
+        for mode in ("attention", "weight_norm", "weight"):
             with self.subTest(mode=mode):
                 self.setUp()
                 one = self.sample(self.slider("broad smile", '{"broad smile": 1}', mode), self.edit)
@@ -140,17 +140,18 @@ class SliderTests(TinyMing):
             q, k, v = (torch.randn((1, heads, n, 8), generator=generator) for _ in range(3))
             plain = func(q, k, v, heads, None)
             if n == image_len:
-                torch.testing.assert_close(sliders.concept_attention(None, bias, None, image_len)(func, q, k, v, heads, None), plain)
+                torch.testing.assert_close(sliders.concept_attention(None, bias, None, None, image_len)(func, q, k, v, heads, None), plain)
                 continue
             logits = torch.zeros((1, 1, 1, n))
             logits[..., 2:4] = math.log(3)
-            torch.testing.assert_close(sliders.concept_attention(None, bias, None, image_len)(func, q, k, v, heads, None), func(q, k, v, heads, logits))
+            torch.testing.assert_close(sliders.concept_attention(None, bias, None, None, image_len)(func, q, k, v, heads, None), func(q, k, v, heads, logits))
             scaled = v.clone()
             scaled[:, :, 2:4] *= 3
-            normed = sliders.concept_attention(None, None, weight, image_len)(func, q, k, v, heads, None).unflatten(-1, (heads, -1))
+            normed = sliders.concept_attention(None, None, weight, None, image_len)(func, q, k, v, heads, None).unflatten(-1, (heads, -1))
             expected = func(q, k, scaled, heads, None).unflatten(-1, (heads, -1))
             torch.testing.assert_close(normed.norm(dim=-1), plain.unflatten(-1, (heads, -1)).norm(dim=-1))
             torch.testing.assert_close(normed / normed.norm(dim=-1, keepdim=True), expected / expected.norm(dim=-1, keepdim=True))
+            torch.testing.assert_close(sliders.concept_attention(None, None, None, weight, image_len)(func, q, k, v, heads, None), func(q, k, scaled, heads, None))
 
 
 class CurveTests(TinyMing):
@@ -158,7 +159,7 @@ class CurveTests(TinyMing):
         return sliders.MingConceptCurves.execute(self.model, self.clip, "\n".join(curves), 3, 4.0, json.dumps(curves), mode, False, axis)[0]
 
     def test_flat_curve_is_the_slider(self):
-        for mode in ("attention", "weight_norm"):
+        for mode in ("attention", "weight_norm", "weight"):
             with self.subTest(mode=mode):
                 self.setUp()
                 curve = self.sample(self.curves({"fisheye lens": [[0, 2.5]]}, mode))

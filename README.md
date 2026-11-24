@@ -46,8 +46,11 @@ The slider and curve nodes have a `bypass` switch that returns the model unchang
 |---|---|
 | attention | Adds log(w) to the attention logits on the concept's tokens in the context refiner and every joint block. |
 | weight_norm | Scales the attention values of the concept's tokens and keeps each head's attention output at the magnitude it has with the concept as written. Runs attention twice. |
+| weight | Scales the attention values of the concept's tokens with no limit. |
 
 Negative strengths have no meaning in these modes, so a single concept goes from 0 up. A concept such as `fisheye lens` saturates early: strength 1 to 8 gives about the same lens.
+
+Ming-Image normalizes every attention output (RMSNorm) before a tanh gate, so no mode blows the image up the way scaling does in other models. In attention mode the concept's share of attention saturates: `big nose` grows up to about 40 and shrinks after that, because the concept then takes the attention the image tokens need to place it. weight has no ceiling, but it does not exaggerate the concept: in the same test `big nose` at 1 to 40 left the nose as it was, 100 drifted to a softer, more generic portrait and 400 broke the image into texture. Use attention to push a concept and weight to explore past it.
 
 The modes run attention through an override, so the attention backend chosen with Model Attention Backend is replaced by ComfyUI's default one while a concept is active.
 
