@@ -1,0 +1,169 @@
+{
+ "1": {
+  "class_type": "UNETLoader",
+  "inputs": {
+   "unet_name": "ming/ming_image_0.1_design_int8_convrot.safetensors",
+   "weight_dtype": "default"
+  }
+ },
+ "2": {
+  "class_type": "ModelAttentionBackend",
+  "inputs": {
+   "model": [
+    "1",
+    0
+   ],
+   "attention": "comfy kitchen attention"
+  }
+ },
+ "3": {
+  "class_type": "ModelSamplingFlux",
+  "inputs": {
+   "model": [
+    "30",
+    0
+   ],
+   "max_shift": 1.15,
+   "base_shift": 0.5,
+   "width": 1024,
+   "height": 1024
+  }
+ },
+ "4": {
+  "class_type": "CLIPLoader",
+  "inputs": {
+   "clip_name": "ming/ming_image_0.1_ling_mini_2.0_int8_convrot.safetensors",
+   "type": "qwen_image",
+   "device": "default"
+  }
+ },
+ "5": {
+  "class_type": "VAELoader",
+  "inputs": {
+   "vae_name": "ming/ming_image_vae_bf16.safetensors"
+  }
+ },
+ "6": {
+  "class_type": "TextEncodeMingImageEdit",
+  "inputs": {
+   "clip": [
+    "4",
+    0
+   ],
+   "prompt": "Photo of a young woman with long brown hair sitting at a cafe table by a large window, holding a cup of coffee, soft natural daylight, shallow depth of field."
+  }
+ },
+ "7": {
+  "class_type": "BasicGuider",
+  "inputs": {
+   "model": [
+    "3",
+    0
+   ],
+   "conditioning": [
+    "6",
+    0
+   ]
+  }
+ },
+ "8": {
+  "class_type": "RandomNoise",
+  "inputs": {
+   "noise_seed": 11
+  }
+ },
+ "9": {
+  "class_type": "KSamplerSelect",
+  "inputs": {
+   "sampler_name": "euler"
+  }
+ },
+ "10": {
+  "class_type": "BasicScheduler",
+  "inputs": {
+   "model": [
+    "3",
+    0
+   ],
+   "scheduler": "simple",
+   "steps": 12,
+   "denoise": 1.0
+  }
+ },
+ "11": {
+  "class_type": "EmptyLatentImage",
+  "inputs": {
+   "width": 1024,
+   "height": 1024,
+   "batch_size": 1
+  }
+ },
+ "12": {
+  "class_type": "SamplerCustomAdvanced",
+  "inputs": {
+   "noise": [
+    "8",
+    0
+   ],
+   "guider": [
+    "7",
+    0
+   ],
+   "sampler": [
+    "9",
+    0
+   ],
+   "sigmas": [
+    "10",
+    0
+   ],
+   "latent_image": [
+    "11",
+    0
+   ]
+  }
+ },
+ "13": {
+  "class_type": "VAEDecode",
+  "inputs": {
+   "samples": [
+    "12",
+    0
+   ],
+   "vae": [
+    "5",
+    0
+   ]
+  }
+ },
+ "14": {
+  "class_type": "SaveImage",
+  "inputs": {
+   "images": [
+    "13",
+    0
+   ],
+   "filename_prefix": "ming_concept_curves"
+  }
+ },
+ "30": {
+  "class_type": "MingConceptCurves",
+  "inputs": {
+   "model": [
+    "2",
+    0
+   ],
+   "clip": [
+    "4",
+    0
+   ],
+   "concepts": "fisheye lens\nbroad smile",
+   "steps": 12,
+   "max_strength": 4.0,
+   "curves": "{\"fisheye lens\": [[0, 3.0], [4, 3.0], [7, 1.0]], \"broad smile\": [[0, 0.0], [5, 0.0], [6, 1.5]]}",
+   "mode": "attention",
+   "bypass": false,
+   "axis": "steps"
+  }
+ }
+}
